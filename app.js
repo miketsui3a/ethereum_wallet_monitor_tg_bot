@@ -105,34 +105,38 @@ async function main() {
 
             const tx = await web4.eth.getTransaction(result)
             const receipt = await web4.eth.getTransactionReceipt(result)
-            if (targetAddress.map(x => x.address).includes(tx.from)) {
-                const target = targetAddress.filter(x => x.address == tx.from)[0]
-
-                const data = abiDecoder.decodeMethod(tx.input)
-                if (receipt.status && data && data.name.includes("swap")) {
-                    let logs = abiDecoder.decodeLogs(receipt.logs);
-                    logs = logs.filter(log => log.name == "Transfer")
-                    console.log(tx.from)
-
-
-                    const path = data.params[data.params.findIndex(x => x.name == 'path')].value
-                    const inTokenContract = new web4.eth.Contract(erc20Abi, path[0])
-                    const outTokenContract = new web4.eth.Contract(erc20Abi, path[path.length - 1])
-
-                    const inTokenName = await inTokenContract.methods.symbol().call()
-                    const outTokenName = await outTokenContract.methods.symbol().call()
-
-                    const inAmount = inTokenName == "USDC" || inTokenName == "fUSDT" ? web3.utils.fromWei(logs[0].events[2].value, 'mwei') : web3.utils.fromWei(logs[0].events[2].value, 'ether')
-                    const outAmount = outTokenName == "USDC" || outTokenName == "fUSDT" ? web3.utils.fromWei(logs[logs.length - 1].events[2].value, 'mwei') : web3.utils.fromWei(logs[logs.length - 1].events[2].value, 'ether')
-                    console.log("intoken: ", inTokenName, inAmount)
-                    console.log("outToken: ", outTokenName, outAmount)
-
-                    const targetGroupIds = require('./groupIds.json')
-
-                    for (id of targetGroupIds) {
-                        bot.sendMessage(id, `${target.name}\n${target.address} \nsell: ${inTokenName} ${inAmount}\nbuy: ${outTokenName} ${outAmount}\nhttps://ftmscan.com/tx/${result}`)
+            try{
+                if (targetAddress.map(x => x.address).includes(tx.from)) {
+                    const target = targetAddress.filter(x => x.address == tx.from)[0]
+    
+                    const data = abiDecoder.decodeMethod(tx.input)
+                    if (receipt.status && data && data.name.includes("swap")) {
+                        let logs = abiDecoder.decodeLogs(receipt.logs);
+                        logs = logs.filter(log => log.name == "Transfer")
+                        console.log(tx.from)
+    
+    
+                        const path = data.params[data.params.findIndex(x => x.name == 'path')].value
+                        const inTokenContract = new web4.eth.Contract(erc20Abi, path[0])
+                        const outTokenContract = new web4.eth.Contract(erc20Abi, path[path.length - 1])
+    
+                        const inTokenName = await inTokenContract.methods.symbol().call()
+                        const outTokenName = await outTokenContract.methods.symbol().call()
+    
+                        const inAmount = inTokenName == "USDC" || inTokenName == "fUSDT" ? web3.utils.fromWei(logs[0].events[2].value, 'mwei') : web3.utils.fromWei(logs[0].events[2].value, 'ether')
+                        const outAmount = outTokenName == "USDC" || outTokenName == "fUSDT" ? web3.utils.fromWei(logs[logs.length - 1].events[2].value, 'mwei') : web3.utils.fromWei(logs[logs.length - 1].events[2].value, 'ether')
+                        console.log("intoken: ", inTokenName, inAmount)
+                        console.log("outToken: ", outTokenName, outAmount)
+    
+                        const targetGroupIds = require('./groupIds.json')
+    
+                        for (id of targetGroupIds) {
+                            bot.sendMessage(id, `${target.name}\n${target.address} \nsell: ${inTokenName} ${inAmount}\nbuy: ${outTokenName} ${outAmount}\nhttps://ftmscan.com/tx/${result}`)
+                        }
                     }
                 }
+            }catch(e){
+                console.log(e)
             }
 
         }
