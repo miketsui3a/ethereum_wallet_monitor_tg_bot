@@ -2,10 +2,11 @@ require("dotenv").config();
 const Web3 = require("web3");
 const abiDecoder = require("abi-decoder");
 const fs = require("fs");
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const NodeCache = require("node-cache");
 
-const myCache = new NodeCache({ stdTTL: 10 });
+const myCache = new NodeCache({ stdTTL: 5 });
 
 const erc20Abi = require("./erc20Abi.json");
 const routerAbi = require("./routerAbi.json");
@@ -20,70 +21,59 @@ const bot = new TelegramBot(process.env.TG_BOT_API_KEY, { polling: true });
 abiDecoder.addABI(erc20Abi);
 abiDecoder.addABI(routerAbi);
 
-async function scanBlock(blockNumber, myCache){
-  let targetAddress = myCache.get("targetAddress");
-  const block = await web4.eth.getBlock(blockNumber)
-  console.log(block.transactions)
-  console.log(targetAddress)
-  block.transactions.map(async txHash=>{
-    const tx = await web4.eth.getTransaction(txHash)
-    const receipt = await web4.eth.getTransactionReceipt(txHash)
-    try {
-      if (targetAddress.map((x) => x.address).includes(tx.from)) {
-        const target = targetAddress.filter((x) => x.address == tx.from)[0];
+async function ftmScan(candidates, currentIndex) {
+  const selectedCandidates = []
+  const targetGroupIds = require("./groupIds.json");
+  const loopUntil = candidates.length > 5 ? 5 : candidates.length
+  for (let i = 0; i < loopUntil; i++) {
+    selectedCandidates.push(candidates[currentIndex.idx])
+    currentIndex.idx = (currentIndex.idx + 1) % candidates.length
+  }
 
-        console.log("bingo!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+  console.log("selected candidate: ", selectedCandidates)
 
-        const data = abiDecoder.decodeMethod(tx.input);
-        if (receipt.status && data && data.name.includes("swap")) {
-          let logs = abiDecoder.decodeLogs(receipt.logs);
-          logs = logs.filter((log) => log.name == "Transfer");
-          console.log(tx.from);
 
-          const path =
-            data.params[data.params.findIndex((x) => x.name == "path")].value;
-          const inTokenContract = new web4.eth.Contract(erc20Abi, path[0]);
-          const outTokenContract = new web4.eth.Contract(
-            erc20Abi,
-            path[path.length - 1]
-          );
+  selectedCandidates.map(async x => {
+    const response = await fetch(`https://api.ftmscan.com/api?module=account&action=tokentx&address=${x.address}&page=1&offset=10&startblock=0&endblock=999999999&sort=desc&apikey=${process.env.FTMSCAN_API_KEY}`)
+    const data = await response.json()
+    const cache = myCache.get("targetAddress");
+    const idx = cache.findIndex((z) => z.address == x.address);
+    cache[idx].lastNonce = data.result[0].nonce
+    myCache.set("targetAddress", cache);
 
-          const inTokenName = await inTokenContract.methods.symbol().call();
-          const outTokenName = await outTokenContract.methods.symbol().call();
+    const newTransferEvent = data.result.filter(evt => parseInt(evt.nonce) > (x.lastNonce || 0))
+    const indexedNewTransferEvent = {}
+    newTransferEvent.map(y => {
+      if (!indexedNewTransferEvent[y.nonce]) indexedNewTransferEvent[y.nonce] = []
+      indexedNewTransferEvent[y.nonce].push(y)
+    })
 
-          const inAmount =
-            inTokenName == "USDC" || inTokenName == "fUSDT"
-              ? web4.utils.fromWei(logs[0].events[2].value, "mwei")
-              : web4.utils.fromWei(logs[0].events[2].value, "ether");
-          const outAmount =
-            outTokenName == "USDC" || outTokenName == "fUSDT"
-              ? web4.utils.fromWei(
-                  logs[logs.length - 1].events[2].value,
-                  "mwei"
-                )
-              : web4.utils.fromWei(
-                  logs[logs.length - 1].events[2].value,
-                  "ether"
-                );
-          console.log("intoken: ", inTokenName, inAmount);
-          console.log("outToken: ", outTokenName, outAmount);
+    console.log(myCache.get("targetAddress"))
+    console.log(newTransferEvent)
 
-          const targetGroupIds = require("./groupIds.json");
+    for (const [key, value] of Object.entries(indexedNewTransferEvent)) {
+      console.log(`${key}: ${value}`);
+      console.log(value)
 
-          for (id of targetGroupIds) {
-            bot.sendMessage(
-              id,
-              `${target.name}\n${target.address} \nsell: ${inTokenName} ${inAmount}\nbuy: ${outTokenName} ${outAmount}\nhttps://ftmscan.com/tx/${txHash}`
-            );
-          }
-        }
+      const inEvent = value.filter(inEvt => inEvt.to == x.address.toLowerCase())
+      const inTokenName = inEvent[0]?.tokenSymbol
+      const inAmount = inEvent[0]?.value / inEvent[0]?.tokenDecimal
+
+      const outEvent = value.filter(inEvt => inEvt.from == x.address.toLowerCase())
+      const outTokenName = outEvent[0]?.tokenSymbol
+      const outAmount = outEvent[0]?.value / outEvent[0]?.tokenDecimal
+
+      for (id of targetGroupIds) {
+        bot.sendMessage(
+          id,
+          `${x.name}\n${x.address} \nin: ${inTokenName} ${inAmount}\nout: ${outTokenName} ${outAmount}\nhttps://ftmscan.com/tx/${value[0].hash}`
+        );
       }
-    } catch (e) {
-      console.log(e);
     }
-
+    // if(x.lastNonce>-1&&)
   })
 }
+
 
 async function main() {
   console.log("running...");
@@ -94,6 +84,7 @@ async function main() {
     console.log("cache expired");
     myCache.set("targetAddress", value);
     fs.writeFileSync("./targetAddress.json", JSON.stringify(value));
+    console.log(value);
     console.log("cache updated");
   });
 
@@ -166,85 +157,10 @@ async function main() {
     // bot.sendMessage(chatId, `${chatId} Received your message`);
   });
 
-  let currentBlockNumber = await web4.eth.getBlockNumber()
-  setInterval(async()=>{
-    const newBlockNumber = await web4.eth.getBlockNumber()
-    console.log("new block number: ",newBlockNumber)
-
-    if (newBlockNumber!=currentBlockNumber){
-      for (let i=currentBlockNumber;i<newBlockNumber;i++){
-        await scanBlock(i, myCache)
-        console.log("block: ",i," finished scanning!")
-      }
-      currentBlockNumber = newBlockNumber
-    }
-  },1000)
-
-  // web4.eth.subscribe("pendingTransactions", async (error, result) => {
-  //   if (error) {
-  //     console.log(error);
-  //   } else {
-  //     // const rst = await Promise.all([web4.eth.getTransaction(result), web4.eth.getTransactionReceipt(result)])
-  //     // const tx = rst[0]
-  //     // const receipt = rst[1]
-
-  //     let targetAddress = myCache.get("targetAddress");
-
-  //     const tx = await web4.eth.getTransaction(result);
-  //     const receipt = await web4.eth.getTransactionReceipt(result);
-  //     try {
-  //       if (targetAddress.map((x) => x.address).includes(tx.from)) {
-  //         const target = targetAddress.filter((x) => x.address == tx.from)[0];
-
-  //         const data = abiDecoder.decodeMethod(tx.input);
-  //         if (receipt.status && data && data.name.includes("swap")) {
-  //           let logs = abiDecoder.decodeLogs(receipt.logs);
-  //           logs = logs.filter((log) => log.name == "Transfer");
-  //           console.log(tx.from);
-
-  //           const path =
-  //             data.params[data.params.findIndex((x) => x.name == "path")].value;
-  //           const inTokenContract = new web4.eth.Contract(erc20Abi, path[0]);
-  //           const outTokenContract = new web4.eth.Contract(
-  //             erc20Abi,
-  //             path[path.length - 1]
-  //           );
-
-  //           const inTokenName = await inTokenContract.methods.symbol().call();
-  //           const outTokenName = await outTokenContract.methods.symbol().call();
-
-  //           const inAmount =
-  //             inTokenName == "USDC" || inTokenName == "fUSDT"
-  //               ? web4.utils.fromWei(logs[0].events[2].value, "mwei")
-  //               : web4.utils.fromWei(logs[0].events[2].value, "ether");
-  //           const outAmount =
-  //             outTokenName == "USDC" || outTokenName == "fUSDT"
-  //               ? web4.utils.fromWei(
-  //                   logs[logs.length - 1].events[2].value,
-  //                   "mwei"
-  //                 )
-  //               : web4.utils.fromWei(
-  //                   logs[logs.length - 1].events[2].value,
-  //                   "ether"
-  //                 );
-  //           console.log("intoken: ", inTokenName, inAmount);
-  //           console.log("outToken: ", outTokenName, outAmount);
-
-  //           const targetGroupIds = require("./groupIds.json");
-
-  //           for (id of targetGroupIds) {
-  //             bot.sendMessage(
-  //               id,
-  //               `${target.name}\n${target.address} \nsell: ${inTokenName} ${inAmount}\nbuy: ${outTokenName} ${outAmount}\nhttps://ftmscan.com/tx/${result}`
-  //             );
-  //           }
-  //         }
-  //       }
-  //     } catch (e) {
-  //       console.log(e);
-  //     }
-  //   }
-  // });
+  const currentIndex = { idx: 0 }
+  setInterval(async () => {
+    await ftmScan(myCache.get("targetAddress"), currentIndex)
+  }, 5000)
 }
 
 main();
