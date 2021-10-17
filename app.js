@@ -41,7 +41,23 @@ async function ftmScan(candidates, currentIndex) {
     cache[idx].lastNonce = data.result[0].nonce
     myCache.set("targetAddress", cache);
 
-    const newTransferEvent = data.result.filter(evt => parseInt(evt.nonce) > (x.lastNonce || 0))
+    console.log("x:", x)
+    const newTransferEvent = data.result.filter(evt => {
+      let ok = false
+      console.log("first harsh: ", evt.hash)
+      if (evt.to == x.address.toLowerCase()) {
+        for (const a of data.result) {
+          console.log("target: ", a.hash)
+          if (a.hash == evt.hash && a.value != evt.value) {
+            console.log(evt.hash, a.hash)
+            ok = true
+            console.log("ok")
+            break
+          }
+        }
+      }
+      return parseInt(evt.nonce) > (x.lastNonce || 0) && ok
+    })
     const indexedNewTransferEvent = {}
     newTransferEvent.map(y => {
       if (!indexedNewTransferEvent[y.nonce]) indexedNewTransferEvent[y.nonce] = []
@@ -49,11 +65,9 @@ async function ftmScan(candidates, currentIndex) {
     })
 
     console.log(myCache.get("targetAddress"))
-    console.log(newTransferEvent)
+    // console.log(newTransferEvent)
 
     for (const [key, value] of Object.entries(indexedNewTransferEvent)) {
-      console.log(`${key}: ${value}`);
-      console.log(value)
 
       const inEvent = value.filter(inEvt => inEvt.to == x.address.toLowerCase())
       const inTokenName = inEvent[0]?.tokenSymbol
