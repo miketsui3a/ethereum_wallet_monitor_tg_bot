@@ -77,7 +77,10 @@ async function ftmScan(candidates, currentIndex) {
       const outTokenName = outEvent[0]?.tokenSymbol
       const outAmount = outEvent[0]?.value / outEvent[0]?.tokenDecimal
 
+      console.log("groups Id: ",targetGroupIds)
       for (id of targetGroupIds) {
+      console.log("groups sdfsdfId: ",id)
+
         bot.sendMessage(
           id,
           `${x.name}\n${x.address} \nin: ${inTokenName} ${inAmount}\nout: ${outTokenName} ${outAmount}\nhttps://ftmscan.com/tx/${value[0].hash}`
